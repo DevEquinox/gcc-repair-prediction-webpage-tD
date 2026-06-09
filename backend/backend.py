@@ -697,6 +697,41 @@ def confirm_model_promotion(payload: ConfirmModelRequest):
     )
 
 
+@app.get("/api/models/current")
+def get_current_model():
+    """
+    ENDPOINT 3.5: RETRIEVE THE CURRENTLY ACTIVE MODEL METADATA
+    Lightweight endpoint that returns only metadata (no heavy model loading).
+    """
+    version_id = get_active_version_id()
+    if not version_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active model found.",
+        )
+
+    metrics_path = os.path.join(MODEL_DIR, f"metrics_{version_id}.json")
+    if not os.path.exists(metrics_path):
+        return {
+            "version_id": version_id,
+            "message": "Metrics not found for active model.",
+        }
+
+    with open(metrics_path, "r") as f:
+        metrics = json.load(f)
+
+    return {
+        "version_id": version_id,
+        "timestamp": metrics.get("timestamp"),
+        "train_mae": metrics.get("train_mae"),
+        "val_mae": metrics.get("val_mae"),
+        "train_r2": metrics.get("train_r2"),
+        "val_r2": metrics.get("val_r2"),
+        "train_rmse": metrics.get("train_rmse"),
+        "val_rmse": metrics.get("val_rmse"),
+    }
+
+
 @app.get("/api/models/history")
 def get_model_history():
     """

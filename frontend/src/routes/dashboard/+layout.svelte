@@ -4,6 +4,7 @@
   const nav = [
     { label: "Predictions", href: "/dashboard/predictions" },
     { label: "Train Model", href: "/dashboard/train-model" },
+    { label: "Model History", href: "/dashboard/model-history" },
   ];
 </script>
 

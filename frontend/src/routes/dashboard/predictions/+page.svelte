@@ -8,14 +8,34 @@
     estimated_quantity: number;
   };
 
+  type CurrentModel = {
+    version_id: string;
+    timestamp: number;
+    train_mae: number;
+    val_mae: number;
+    train_r2: number;
+    val_r2: number;
+    train_rmse: number;
+    val_rmse: number;
+  };
+
   let rows: PredictionRow[] = [];
   let loading = true;
   let errorMessage = "";
 
+  let currentModel: CurrentModel | null = null;
+  let modelLoading = true;
+  let modelError = "";
+
   let selectedPlant = "ALL";
   let search = "";
 
+  function formatDate(ts: number): string {
+    return new Date(ts * 1000).toLocaleString();
+  }
+
   onMount(async () => {
+    // Load predictions
     try {
       const response = await fetch("/api/predictions");
       if (!response.ok) {
@@ -25,7 +45,6 @@
         return;
       }
       const data = await response.json();
-      // Map backend field names to frontend expected fields
       rows = data.map((item: any) => ({
         plant: item.plant,
         material: String(item.material),
@@ -36,6 +55,21 @@
       errorMessage = "Network error. Is the backend running?";
     } finally {
       loading = false;
+    }
+
+    // Load current model metadata
+    try {
+      const res = await fetch("/api/models/current");
+      if (res.ok) {
+        currentModel = await res.json();
+      } else {
+        const data = await res.json();
+        modelError = data.detail ?? "Failed to load current model info.";
+      }
+    } catch (err) {
+      modelError = "Network error loading model info.";
+    } finally {
+      modelLoading = false;
     }
   });
 
@@ -80,6 +114,38 @@
       <h2>{totalParts}</h2>
     </div>
   </div>
+
+  {#if modelLoading}
+    <div class="model-info loading">Loading current model info...</div>
+  {:else if modelError}
+    <div class="model-info error">{modelError}</div>
+  {:else if currentModel}
+    <div class="model-info">
+      <h3>Current Production Model</h3>
+      <div class="model-grid">
+        <div>
+          <span class="label">Version ID</span>
+          <span class="value mono">{currentModel.version_id}</span>
+        </div>
+        <div>
+          <span class="label">Trained At</span>
+          <span class="value">{formatDate(currentModel.timestamp)}</span>
+        </div>
+        <div>
+          <span class="label">Val MAE</span>
+          <span class="value">{currentModel.val_mae?.toFixed(4) ?? "—"}</span>
+        </div>
+        <div>
+          <span class="label">Val R²</span>
+          <span class="value">{currentModel.val_r2?.toFixed(4) ?? "—"}</span>
+        </div>
+        <div>
+          <span class="label">Val RMSE</span>
+          <span class="value">{currentModel.val_rmse?.toFixed(4) ?? "—"}</span>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   <div class="filters">
     <label>
@@ -221,5 +287,55 @@
     border: 1px solid #ef4444;
     border-radius: 8px;
     padding: 1rem;
+  }
+
+  .model-info {
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    padding: 1.2rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .model-info h3 {
+    margin: 0 0 0.8rem 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+  }
+
+  .model-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+  }
+
+  .model-grid > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .label {
+    font-size: 0.75rem;
+    color: #6b7280;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+
+  .value {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #111827;
+  }
+
+  .mono {
+    font-family: ui-monospace, monospace;
+    font-size: 0.8rem;
+  }
+
+  .model-info.loading {
+    color: #6b7280;
+    background: #f9fafb;
   }
 </style>

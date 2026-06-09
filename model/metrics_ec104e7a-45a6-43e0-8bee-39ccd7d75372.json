@@ -1,0 +1,10 @@
+{
+    "train_mae": 1.2549,
+    "val_mae": 1.9036,
+    "train_rmse": 5.7246,
+    "val_rmse": 13.3567,
+    "train_r2": 0.8602,
+    "val_r2": 0.5406,
+    "version_id": "ec104e7a-45a6-43e0-8bee-39ccd7d75372",
+    "timestamp": 1781032811.3629866
+}

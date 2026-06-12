@@ -13,8 +13,8 @@ Web application that predicts 30-day spare part demand for GCC's fleet maintenan
 | `backend/` | FastAPI service (Python 3.11) — prediction pipeline, retraining, model registry |
 | `frontend/` | SvelteKit app (Node 20) — dashboard, predictions, model history, retraining UI |
 | `model/` | Versioned model artifacts, encoder mappings, and metrics JSON |
-| `nginx/` | Reverse proxy routing `/api` to backend and `/` to frontend |
-| `docker-compose.yml` | Orchestrates backend, frontend, and nginx containers |
+| `nginx/` | Reverse proxy routing `/api` to backend and `/` to frontend **NOTE**: NOT USED IN DEPLOYMENT IN Render
+| `docker-compose.yml` | Orchestrates backend, frontend, and nginx containers **NOTE**: NOT USED IN DEPLOYMENT IN Render
 
 ## Local Setup
 
@@ -76,3 +76,4 @@ None.
 
 1. **Demand sparsity**: Most plant-material combinations record zero demand in a 30-day window, so rare-demand events are inherently harder to predict.
 2. **Missing external signals**: The model does not use route conditions, supplier delays, driver behaviour, or seasonality beyond month-of-year.
+3. **Struggles with parts with highly volatile demand**: The model struggles to predict parts that have frequent spikes in demand that are 2-5 times the average.

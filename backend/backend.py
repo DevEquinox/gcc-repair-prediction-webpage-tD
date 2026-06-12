@@ -24,13 +24,7 @@ AUTH_PASSWORD_HASH = os.getenv("AUTH_PASSWORD_HASH", "")
 AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "")
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 
-
 def _decode_password_hash(raw_hash: str) -> str:
-    """
-    The password hash may be stored as a base64-encoded bcrypt hash to avoid
-    issues with '$' characters being interpreted as variables by some env-file
-    parsers. If base64 decoding fails, fall back to the raw hash string.
-    """
     if not raw_hash:
         return ""
     try:
@@ -39,10 +33,9 @@ def _decode_password_hash(raw_hash: str) -> str:
     except Exception:
         return raw_hash
 
-
 AUTH_PASSWORD_HASH_DECODED = _decode_password_hash(AUTH_PASSWORD_HASH)
 SESSION_COOKIE_NAME = "auth_session"
-SESSION_MAX_AGE = 60 * 60 * 24 * 7  # 7 days
+SESSION_MAX_AGE = 60 * 60 * 24 * 7
 
 _session_serializer = URLSafeTimedSerializer(AUTH_SECRET_KEY or "fallback-secret")
 
@@ -77,12 +70,10 @@ EXPECTED_COLUMNS = {
 
 class ConfirmModelRequest(BaseModel):
     run_id: str
-    use_new_model: str  # "y" or "n"
-
+    use_new_model: str
 
 class RollbackModelRequest(BaseModel):
     version_id: str
-
 
 class LoginRequest(BaseModel):
     username: str
@@ -94,17 +85,13 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     except Exception:
         return False
 
-
 def create_session_token(username: str) -> str:
     return _session_serializer.dumps({"user": username})
-
 
 def decode_session_token(token: str) -> dict:
     return _session_serializer.loads(token, max_age=SESSION_MAX_AGE)
 
-
 def get_current_user(request: Request) -> str:
-    """Dependency that validates the session cookie on protected routes."""
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if not token:
         raise HTTPException(
@@ -122,16 +109,13 @@ def get_current_user(request: Request) -> str:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-
 def find_first_existing(paths: List[str]) -> str:
     for p in paths:
         if os.path.exists(p):
             return p
     return ""
 
-
 def get_active_version_id() -> str:
-    """Reads the active version tracking file, returns 'legacy' if file doesn't exist."""
     if os.path.exists(ACTIVE_VERSION_CONFIG):
         try:
             with open(ACTIVE_VERSION_CONFIG, "r") as f:
@@ -141,13 +125,7 @@ def get_active_version_id() -> str:
             return "legacy"
     return "legacy"
 
-
 def load_production_artifacts():
-    """
-    Loads production model components securely based on the active version tracker.
-    Returns (model, encoders, metrics, inference_features). Missing components are
-    returned as None, letting callers decide how to respond.
-    """
     try:
         version_id = get_active_version_id()
 
@@ -171,14 +149,7 @@ def load_production_artifacts():
     except Exception:
         return None, None, None, None
 
-
 def load_consumables(source: Union[str, bytes, None] = None) -> set:
-    """
-    Load consumables list from Excel for filtering.
-    If a source is provided it is used; otherwise the legacy candidates are
-    searched best-effort (kept only for backward compatibility with private
-    training workflows).
-    """
     try:
         if source is None:
             path = find_first_existing(CONSUMABLES_CANDIDATES)
@@ -194,15 +165,9 @@ def load_consumables(source: Union[str, bytes, None] = None) -> set:
     except Exception:
         return set()
 
-
 def preprocess_raw_sheets(
     excel_file: Union[str, bytes], consumables: Union[set, None] = None
 ) -> pd.DataFrame:
-    """
-    Replicates the core preprocessing from notebook 03.
-    Reads the three required sheets, cleans, merges, optionally filters
-    consumables, and returns a consolidated DataFrame.
-    """
     try:
         if isinstance(excel_file, bytes):
             excel_file = io.BytesIO(excel_file)
@@ -214,12 +179,10 @@ def preprocess_raw_sheets(
     if missing_sheets:
         raise ValueError(f"Missing required Excel worksheets: {', '.join(missing_sheets)}")
 
-    # --- Read sheets ---
     teams = pd.read_excel(xls, sheet_name="Equipos")
     orders = pd.read_excel(xls, sheet_name="Ordenes de trabajo")
     repairs = pd.read_excel(xls, sheet_name="Refacciones")
 
-    # --- Validate required columns ---
     missing_cols_report = []
     for sheet_name, required_cols in EXPECTED_COLUMNS.items():
         df_map = {"Equipos": teams, "Ordenes de trabajo": orders, "Refacciones": repairs}
@@ -230,7 +193,6 @@ def preprocess_raw_sheets(
     if missing_cols_report:
         raise ValueError("; ".join(missing_cols_report))
 
-    # --- Clean keys ---
     teams["EQUIPO"] = teams["EQUIPO"].astype(str).str.strip()
     orders["Order"] = orders["Order"].astype(str).str.strip()
     orders["Equipment"] = orders["Equipment"].astype(str).str.strip()
@@ -250,7 +212,6 @@ def preprocess_raw_sheets(
         mask = ~base["Description_part"].astype(str).str.strip().str.upper().isin(consumables)
         base = base[mask]
 
-    # --- Standardize column names ---
     base = base.rename(columns={
         "Plant": "plant",
         "Material": "material",
@@ -259,49 +220,38 @@ def preprocess_raw_sheets(
 
     return base
 
-
 def build_snapshot(master_df: pd.DataFrame, ref_date: pd.Timestamp) -> pd.DataFrame:
-    """
-    Builds a single point-in-time feature matrix for all plant-material combos
-    active up to ref_date. Target is demand in the 30 days after ref_date.
-    """
     past = master_df[master_df["Posting Date"] < ref_date]
     future = master_df[
         (master_df["Posting Date"] >= ref_date)
         & (master_df["Posting Date"] < ref_date + pd.Timedelta(days=30))
     ]
 
-    # All combos seen before ref_date
     if past.empty:
         return pd.DataFrame()
 
     combos = past[["plant", "material", "spare_part_name"]].drop_duplicates()
 
-    # 90-day historical aggregates
     past_90 = past[past["Posting Date"] >= ref_date - pd.Timedelta(days=90)]
     feat_90 = past_90.groupby(["plant", "material"]).agg(
         qty_last_90d=("Quantity in UnE", "sum"),
         orders_last_90d=("Order", "nunique"),
     ).reset_index()
 
-    # 180-day historical aggregates
     past_180 = past[past["Posting Date"] >= ref_date - pd.Timedelta(days=180)]
     feat_180 = past_180.groupby(["plant", "material"]).agg(
         qty_last_180d=("Quantity in UnE", "sum"),
         orders_last_180d=("Order", "nunique"),
     ).reset_index()
 
-    # Days since last use
     last_use = past.groupby(["plant", "material"])["Posting Date"].max().reset_index()
     last_use["days_since_last_used"] = (ref_date - last_use["Posting Date"]).dt.days
     last_use = last_use.drop(columns=["Posting Date"])
 
-    # Target: next 30 days
     target = future.groupby(["plant", "material"]).agg(
         qty_needed_next_30d=("Quantity in UnE", "sum")
     ).reset_index()
 
-    # Assemble snapshot
     snap = combos.merge(feat_90, on=["plant", "material"], how="left")
     snap = snap.merge(feat_180, on=["plant", "material"], how="left")
     snap = snap.merge(last_use, on=["plant", "material"], how="left")
@@ -314,13 +264,7 @@ def build_snapshot(master_df: pd.DataFrame, ref_date: pd.Timestamp) -> pd.DataFr
 
     return snap
 
-
 def build_latest_inference_features(master_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Builds the feature snapshot at the latest posting date and returns only the
-    columns required for inference. This allows predictions to be served without
-    keeping the raw dataset on the public server.
-    """
     if master_df.empty or "Posting Date" not in master_df.columns:
         return pd.DataFrame()
 
@@ -343,14 +287,11 @@ def build_latest_inference_features(master_df: pd.DataFrame) -> pd.DataFrame:
     ]
     return snap[inference_cols].copy()
 
-
 def create_training_snapshots(master_df: pd.DataFrame) -> pd.DataFrame:
-    """Creates monthly snapshots across the data span for training/validation."""
     min_date = master_df["Posting Date"].min() + pd.DateOffset(months=6)
     max_date = master_df["Posting Date"].max() - pd.Timedelta(days=30)
 
     if min_date >= max_date:
-        # Not enough date range — create a single snapshot at max_date
         ref_dates = [max_date]
     else:
         ref_dates = pd.date_range(start=min_date, end=max_date, freq="MS")
@@ -366,9 +307,7 @@ def create_training_snapshots(master_df: pd.DataFrame) -> pd.DataFrame:
 
     return pd.concat(snapshots, ignore_index=True)
 
-
 def apply_target_encoding(train_df, val_df, test_df, target_col):
-    """Target-encode plant and material using training statistics only."""
     global_mean = train_df[target_col].mean()
     plant_map = train_df.groupby("plant")[target_col].mean()
     material_map = train_df.groupby("material")[target_col].mean()
@@ -384,9 +323,7 @@ def apply_target_encoding(train_df, val_df, test_df, target_col):
     }
     return encoders
 
-
 def train_xgboost_model(X_train, y_train, X_val, y_val):
-    """Trains an XGBoost Regressor with Poisson objective."""
     model = xgb.XGBRegressor(
         objective="count:poisson",
         n_estimators=200,
@@ -401,7 +338,6 @@ def train_xgboost_model(X_train, y_train, X_val, y_val):
     model.fit(X_train, y_train)
     return model
 
-
 def compute_metrics(model, X, y):
     preds = model.predict(X)
     preds = np.clip(preds, 0, None)
@@ -411,21 +347,12 @@ def compute_metrics(model, X, y):
         "r2": round(float(r2_score(y, preds)), 4),
     }
 
-
-# --- STARTUP: Ensure model directory exists ---
-
 @app.on_event("startup")
 def startup_event():
     os.makedirs(MODEL_DIR, exist_ok=True)
 
-
-# --- API ENDPOINTS ---
-
 @app.post("/api/login")
 def login(payload: LoginRequest, response: Response):
-    """
-    Authenticates the single configured user and sets an HTTP-only session cookie.
-    """
     if not AUTH_USERNAME or not AUTH_PASSWORD_HASH:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -453,22 +380,20 @@ def login(payload: LoginRequest, response: Response):
     )
     return {"message": "Logged in successfully"}
 
-
 @app.post("/api/logout")
 def logout(response: Response):
-    """Clears the session cookie."""
     response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
     return {"message": "Logged out"}
 
+@app.get("/api/models/requirements", dependencies=[Depends(get_current_user)])
+def get_training_requirements():
+    return {
+        "sheets": REQUIRED_SHEETS,
+        "columns": EXPECTED_COLUMNS,
+    }
 
 @app.get("/api/predictions", dependencies=[Depends(get_current_user)])
 def get_predictions():
-    """
-    ENDPOINT 1: DASHBOARD PREDICTIONS
-    Loads the active model and its pre-computed inference features, then
-    returns estimated quantities for the next 30 days per plant-material.
-    Requires a trained model; if none exists, returns "No existing model".
-    """
     model, encoders, _, features = load_production_artifacts()
 
     if model is None or encoders is None or features is None:
@@ -483,7 +408,6 @@ def get_predictions():
         if snap.empty:
             return []
 
-        # Apply target encoding using stored encoders
         snap["plant_encoded"] = snap["plant"].map(
             encoders.get("plant_target_mean", {})
         ).fillna(encoders.get("global_mean", 0))
@@ -509,12 +433,10 @@ def get_predictions():
 
         snap["predicted_quantity"] = np.floor(preds).astype(int)
 
-        # Return only rows with non-zero predictions + a sensible sample cap
         result = snap[snap["predicted_quantity"] > 0][
             ["plant", "material", "spare_part_name", "predicted_quantity"]
         ].to_dict(orient="records")
 
-        # If everything predicted zero, return top 50 by predicted_quantity anyway
         if not result:
             snap = snap.sort_values("predicted_quantity", ascending=False).head(50)
             result = snap[
@@ -529,18 +451,11 @@ def get_predictions():
             detail=f"Prediction pipeline failed: {str(e)}",
         )
 
-
 @app.post("/api/models/train", status_code=status.HTTP_200_OK, dependencies=[Depends(get_current_user)])
 async def train_new_model(
     file: UploadFile = File(...),
     consumables: UploadFile = File(None),
 ):
-    """
-    ENDPOINT 2: DATA SUBMISSION & MODEL RETRAINING
-    Accepts a raw Excel workbook, preprocesses it, trains a candidate XGBoost model,
-    and returns a comparison against the current production model.
-    An optional consumables Excel file may be supplied to filter consumable items.
-    """
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -558,7 +473,6 @@ async def train_new_model(
         master = preprocess_raw_sheets(file_content, consumables=consumables_set)
     except ValueError as ve:
         error_msg = str(ve)
-        # Try to extract missing columns info for frontend
         missing_columns = []
         if "missing columns" in error_msg.lower():
             parts = error_msg.split("missing columns:")
@@ -582,7 +496,6 @@ async def train_new_model(
             detail={"message": str(ve), "missing_columns": []},
         )
 
-    # Temporal split
     unique_dates = sorted(model_df["reference_date"].unique())
     train_end = unique_dates[int(len(unique_dates) * 0.70)]
     val_end = unique_dates[int(len(unique_dates) * 0.85)]
@@ -628,7 +541,6 @@ async def train_new_model(
         "val_r2": val_metrics["r2"],
     }
 
-    # Load current model metrics for comparison
     _, _, current_metrics, _ = load_production_artifacts()
     if current_metrics is None:
         current_metrics = {
@@ -653,7 +565,6 @@ async def train_new_model(
         "features": inference_features,
     }
 
-    # Persist candidate to disk so it survives backend restarts
     try:
         os.makedirs(MODEL_DIR, exist_ok=True)
         candidate_bundle_path = os.path.join(MODEL_DIR, f"candidate_{run_id}.joblib")
@@ -664,7 +575,7 @@ async def train_new_model(
             "features": inference_features,
         }, candidate_bundle_path)
     except Exception:
-        pass  # Best-effort persistence; in-memory registry is the primary source
+        pass
 
     return {
         "run_id": run_id,
@@ -673,19 +584,12 @@ async def train_new_model(
         "new_model": new_metrics,
     }
 
-
 @app.post("/api/models/confirm", dependencies=[Depends(get_current_user)])
 def confirm_model_promotion(payload: ConfirmModelRequest):
-    """
-    ENDPOINT 3: MODEL PROMOTION CONFIRMATION
-    Accepts the frontend's 'use_new_model' flag ('y' or 'n') and either
-    promotes the candidate to production or discards it.
-    """
     action = payload.use_new_model.strip().lower()
 
     if action == "n":
         CANDIDATE_REGISTRY.pop(payload.run_id, None)
-        # Also clean up the on-disk candidate bundle
         candidate_bundle_path = os.path.join(MODEL_DIR, f"candidate_{payload.run_id}.joblib")
         if os.path.exists(candidate_bundle_path):
             os.remove(candidate_bundle_path)
@@ -694,7 +598,6 @@ def confirm_model_promotion(payload: ConfirmModelRequest):
     if action == "y":
         candidate = CANDIDATE_REGISTRY.get(payload.run_id)
         if not candidate:
-            # Try loading from disk if backend was restarted
             candidate_bundle_path = os.path.join(MODEL_DIR, f"candidate_{payload.run_id}.joblib")
             if os.path.exists(candidate_bundle_path):
                 try:
@@ -734,7 +637,6 @@ def confirm_model_promotion(payload: ConfirmModelRequest):
                 json.dump({"active_version_id": payload.run_id}, f, indent=4)
 
             CANDIDATE_REGISTRY.pop(payload.run_id, None)
-            # Clean up the on-disk candidate bundle after promotion
             candidate_bundle_path = os.path.join(MODEL_DIR, f"candidate_{payload.run_id}.joblib")
             if os.path.exists(candidate_bundle_path):
                 os.remove(candidate_bundle_path)
@@ -753,13 +655,8 @@ def confirm_model_promotion(payload: ConfirmModelRequest):
         detail="Invalid use_new_model value. Expected 'y' or 'n'.",
     )
 
-
 @app.get("/api/models/current", dependencies=[Depends(get_current_user)])
 def get_current_model():
-    """
-    ENDPOINT 3.5: RETRIEVE THE CURRENTLY ACTIVE MODEL METADATA
-    Lightweight endpoint that returns only metadata (no heavy model loading).
-    """
     version_id = get_active_version_id()
     if not version_id:
         raise HTTPException(
@@ -788,12 +685,8 @@ def get_current_model():
         "val_rmse": metrics.get("val_rmse"),
     }
 
-
 @app.get("/api/models/history", dependencies=[Depends(get_current_user)])
 def get_model_history():
-    """
-    ENDPOINT 4: RETRIEVE ALL AVAILABLE HISTORICAL MODELS
-    """
     if not os.path.exists(MODEL_DIR):
         return []
 
@@ -814,13 +707,8 @@ def get_model_history():
     history.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
     return history
 
-
 @app.post("/api/models/rollback", dependencies=[Depends(get_current_user)])
 def rollback_model(payload: RollbackModelRequest):
-    """
-    ENDPOINT 5: ROLLBACK
-    Points the active pointer back to an existing older version.
-    """
     target_metrics_path = os.path.join(MODEL_DIR, f"metrics_{payload.version_id}.json")
 
     if not os.path.exists(target_metrics_path):

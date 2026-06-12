@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onMount } from "svelte";
+
   type ModelMetrics = {
     train_mae: number;
     val_mae: number;
@@ -15,13 +17,23 @@
     new_model: ModelMetrics;
   };
 
+  type Requirements = {
+    sheets: string[];
+    columns: Record<string, string[]>;
+  };
+
   let file: File | null = null;
   let consumablesFile: File | null = null;
+  let requirements: Requirements | null = null;
+  let requirementsLoading = true;
+  let requirementsError = "";
+
   let loading = false;
   let errorMessage = "";
   let missingColumns: string[] = [];
   let trainResponse: TrainResponse | null = null;
   let confirmMessage = "";
+
 
   function handleFileChange(event: Event) {
     const input = event.target as HTMLInputElement;
@@ -84,6 +96,22 @@
     }
   }
 
+  onMount(async () => {
+    try {
+      const response = await fetch("/api/models/requirements");
+      if (!response.ok) {
+        const data = await response.json();
+        requirementsError = data.detail ?? "Failed to load requirements.";
+        return;
+      }
+      requirements = await response.json();
+    } catch (err) {
+      requirementsError = "Network error loading requirements.";
+    } finally {
+      requirementsLoading = false;
+    }
+  });
+
   async function confirmModel(useNewModel: boolean) {
     if (!trainResponse) return;
 
@@ -117,6 +145,32 @@
     Upload a new dataset to train a candidate model and compare it against the
     current production model.
   </p>
+
+  {#if requirementsLoading}
+    <p>Loading dataset requirements...</p>
+  {:else if requirementsError}
+    <div class="error">
+      <p>{requirementsError}</p>
+    </div>
+  {:else if requirements}
+    <div class="requirements-card">
+      <h2>Required Dataset Format</h2>
+      <p>The uploaded Excel workbook must contain these sheets:</p>
+      <ul>
+        {#each requirements.sheets as sheet}
+          <li><strong>{sheet}</strong></li>
+        {/each}
+      </ul>
+
+      <p>Each sheet must have these exact column names:</p>
+      {#each Object.entries(requirements.columns) as [sheet, columns]}
+        <div class="sheet-columns">
+          <span class="sheet-name">{sheet}</span>
+          <span class="column-list">{columns.join(", ")}</span>
+        </div>
+      {/each}
+    </div>
+  {/if}
 
   <div class="upload-card">
     <label>
@@ -247,12 +301,42 @@
   .upload-card,
   .results,
   .error,
-  .confirmation {
+  .confirmation,
+  .requirements-card {
     margin-top: 1.5rem;
     padding: 1.2rem;
     border-radius: 12px;
     border: 1px solid #ddd;
     background: white;
+  }
+
+  .requirements-card h2 {
+    font-size: 1.2rem;
+    margin: 0 0 0.8rem 0;
+  }
+
+  .requirements-card ul {
+    margin: 0.5rem 0 1rem 0;
+    padding-left: 1.2rem;
+  }
+
+  .requirements-card li {
+    margin-bottom: 0.3rem;
+  }
+
+  .sheet-columns {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .sheet-name {
+    font-weight: 600;
+    min-width: 160px;
+  }
+
+  .column-list {
+    color: #4b5563;
   }
 
   label {

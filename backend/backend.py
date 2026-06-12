@@ -77,7 +77,9 @@ class RenderCORSMiddleware(BaseHTTPMiddleware):
                 response.headers["Access-Control-Allow-Methods"] = (
                     "GET, POST, PUT, PATCH, DELETE, OPTIONS"
                 )
-                response.headers["Access-Control-Allow-Headers"] = "*"
+                response.headers["Access-Control-Allow-Headers"] = (
+                    "Content-Type, Authorization, X-Requested-With"
+                )
                 response.headers["Vary"] = "Origin"
             return response
 

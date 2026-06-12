@@ -6,6 +6,11 @@
     { label: "Train Model", href: "/dashboard/train-model" },
     { label: "Model History", href: "/dashboard/model-history" },
   ];
+
+  async function logout() {
+    await fetch("/api/logout", { method: "POST" });
+    window.location.href = "/login";
+  }
 </script>
 
 <div class="shell">
@@ -21,6 +26,8 @@
         </a>
       {/each}
     </nav>
+
+    <button class="logout" on:click={logout}>Sign out</button>
   </aside>
 
   <main class="content">
@@ -74,6 +81,23 @@
 
   nav a.active {
     background: #2563eb;
+    color: white;
+  }
+
+  .logout {
+    margin-top: auto;
+    padding: 0.6rem 0.8rem;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    background: transparent;
+    color: #d1d5db;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .logout:hover {
+    background: #1f2937;
     color: white;
   }
 

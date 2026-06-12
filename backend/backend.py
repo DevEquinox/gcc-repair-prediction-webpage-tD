@@ -3,56 +3,77 @@ import time
 import json
 import uuid
 import io
+import base64
 import joblib
+import bcrypt
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, List, Union
-from fastapi import FastAPI, UploadFile, File, HTTPException, status
+from dotenv import load_dotenv
+from fastapi import FastAPI, UploadFile, File, HTTPException, status, Request, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 import xgboost as xgb
+
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
+AUTH_USERNAME = os.getenv("AUTH_USERNAME", "")
+AUTH_PASSWORD_HASH = os.getenv("AUTH_PASSWORD_HASH", "")
+AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "")
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+
+
+def _decode_password_hash(raw_hash: str) -> str:
+    """
+    The password hash may be stored as a base64-encoded bcrypt hash to avoid
+    issues with '$' characters being interpreted as variables by some env-file
+    parsers. If base64 decoding fails, fall back to the raw hash string.
+    """
+    if not raw_hash:
+        return ""
+    try:
+        decoded = base64.b64decode(raw_hash.encode("utf-8"), validate=True)
+        return decoded.decode("utf-8")
+    except Exception:
+        return raw_hash
+
+
+AUTH_PASSWORD_HASH_DECODED = _decode_password_hash(AUTH_PASSWORD_HASH)
+SESSION_COOKIE_NAME = "auth_session"
+SESSION_MAX_AGE = 60 * 60 * 24 * 7  # 7 days
+
+_session_serializer = URLSafeTimedSerializer(AUTH_SECRET_KEY or "fallback-secret")
 
 app = FastAPI(title="Spare Parts Inventory Prediction Engine")
 
-# Enable CORS for Svelte frontend integration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- CONFIGURATION ---
 MODEL_DIR = "../model"
-# Metadata file that acts as the single source of truth for the active model version
 ACTIVE_VERSION_CONFIG = os.path.join(MODEL_DIR, "active_version.json")
 
-# Consumables list path (for filtering out consumable items during training)
-# This is no longer loaded by default; an optional consumables file may be
-# supplied via the training endpoint.
 CONSUMABLES_CANDIDATES = [
     "../../Equipo-D/data/raw/consumables.xlsx",
     "../data/raw/consumables.xlsx",
     "consumables.xlsx",
 ]
 
-# In-memory registry to hold staging candidates before confirmation
 CANDIDATE_REGISTRY: Dict[str, Dict[str, Any]] = {}
 
-# Required Excel worksheets
 REQUIRED_SHEETS = ["Equipos", "Ordenes de trabajo", "Refacciones"]
 
-# Columns we expect in each sheet (used for validation and reading)
 EXPECTED_COLUMNS = {
     "Equipos": ["EQUIPO", "MARCA", "MODELO"],
     "Ordenes de trabajo": ["Order", "Equipment", "Plant", "Created On"],
     "Refacciones": ["Order", "Material", "Posting Date", "Quantity in UnE"],
 }
-
-
-# --- PYDANTIC MODELS ---
 
 class ConfirmModelRequest(BaseModel):
     run_id: str
@@ -63,7 +84,44 @@ class RollbackModelRequest(BaseModel):
     version_id: str
 
 
-# --- HELPER UTILITIES ---
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    try:
+        return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+    except Exception:
+        return False
+
+
+def create_session_token(username: str) -> str:
+    return _session_serializer.dumps({"user": username})
+
+
+def decode_session_token(token: str) -> dict:
+    return _session_serializer.loads(token, max_age=SESSION_MAX_AGE)
+
+
+def get_current_user(request: Request) -> str:
+    """Dependency that validates the session cookie on protected routes."""
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        payload = decode_session_token(token)
+        return payload.get("user", "")
+    except (BadSignature, SignatureExpired):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired session",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
 
 def find_first_existing(paths: List[str]) -> str:
     for p in paths:
@@ -178,20 +236,16 @@ def preprocess_raw_sheets(
     orders["Equipment"] = orders["Equipment"].astype(str).str.strip()
     repairs["Order"] = repairs["Order"].astype(str).str.strip()
 
-    # --- Parse dates ---
     orders["Created On"] = pd.to_datetime(orders["Created On"], errors="coerce")
     repairs["Posting Date"] = pd.to_datetime(repairs["Posting Date"], errors="coerce")
 
-    # --- Merge ---
     base = orders.merge(repairs, on="Order", how="inner", suffixes=("_order", "_part"))
     base = base.merge(teams, left_on="Equipment", right_on="EQUIPO", how="left")
 
-    # --- Clean merged data ---
     base = base.dropna(subset=["Plant", "Material", "Posting Date", "Quantity in UnE"])
     base = base[base["Quantity in UnE"] >= 0]
     base = base[base["Description_part"].astype(str).str.strip() != ""]
 
-    # --- Filter consumables ---
     if consumables:
         mask = ~base["Description_part"].astype(str).str.strip().str.upper().isin(consumables)
         base = base[mask]
@@ -367,7 +421,47 @@ def startup_event():
 
 # --- API ENDPOINTS ---
 
-@app.get("/api/predictions")
+@app.post("/api/login")
+def login(payload: LoginRequest, response: Response):
+    """
+    Authenticates the single configured user and sets an HTTP-only session cookie.
+    """
+    if not AUTH_USERNAME or not AUTH_PASSWORD_HASH:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authentication is not configured on the server.",
+        )
+
+    if payload.username != AUTH_USERNAME or not verify_password(
+        payload.password, AUTH_PASSWORD_HASH_DECODED
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token = create_session_token(AUTH_USERNAME)
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+        max_age=SESSION_MAX_AGE,
+        path="/",
+    )
+    return {"message": "Logged in successfully"}
+
+
+@app.post("/api/logout")
+def logout(response: Response):
+    """Clears the session cookie."""
+    response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
+    return {"message": "Logged out"}
+
+
+@app.get("/api/predictions", dependencies=[Depends(get_current_user)])
 def get_predictions():
     """
     ENDPOINT 1: DASHBOARD PREDICTIONS
@@ -436,7 +530,7 @@ def get_predictions():
         )
 
 
-@app.post("/api/models/train", status_code=status.HTTP_200_OK)
+@app.post("/api/models/train", status_code=status.HTTP_200_OK, dependencies=[Depends(get_current_user)])
 async def train_new_model(
     file: UploadFile = File(...),
     consumables: UploadFile = File(None),
@@ -580,7 +674,7 @@ async def train_new_model(
     }
 
 
-@app.post("/api/models/confirm")
+@app.post("/api/models/confirm", dependencies=[Depends(get_current_user)])
 def confirm_model_promotion(payload: ConfirmModelRequest):
     """
     ENDPOINT 3: MODEL PROMOTION CONFIRMATION
@@ -660,7 +754,7 @@ def confirm_model_promotion(payload: ConfirmModelRequest):
     )
 
 
-@app.get("/api/models/current")
+@app.get("/api/models/current", dependencies=[Depends(get_current_user)])
 def get_current_model():
     """
     ENDPOINT 3.5: RETRIEVE THE CURRENTLY ACTIVE MODEL METADATA
@@ -695,7 +789,7 @@ def get_current_model():
     }
 
 
-@app.get("/api/models/history")
+@app.get("/api/models/history", dependencies=[Depends(get_current_user)])
 def get_model_history():
     """
     ENDPOINT 4: RETRIEVE ALL AVAILABLE HISTORICAL MODELS
@@ -721,7 +815,7 @@ def get_model_history():
     return history
 
 
-@app.post("/api/models/rollback")
+@app.post("/api/models/rollback", dependencies=[Depends(get_current_user)])
 def rollback_model(payload: RollbackModelRequest):
     """
     ENDPOINT 5: ROLLBACK

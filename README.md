@@ -4,7 +4,7 @@ Web application that predicts 30-day spare part demand for GCC's fleet maintenan
 
 ## Live URL
 
-`http://imgoingtostealthexenserverresourcestodothisheehee` *(replace with actual URL)*
+`https://gcc-frontend-ixks.onrender.com/` (they shut down the xenserver...)
 
 ## Repository Structure
 

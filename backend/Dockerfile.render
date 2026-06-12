@@ -1,0 +1,20 @@
+# Dockerfile used by Render (build context is the repo root).
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY backend/backend.py .
+
+# Keep a pristine copy of the model artifacts bundled in the repo.
+# The entrypoint seeds /model from this copy when the Render disk is empty.
+COPY model /app/seed-model
+
+COPY backend/entrypoint-render.sh /app/entrypoint-render.sh
+RUN chmod +x /app/entrypoint-render.sh
+
+EXPOSE 8000
+
+CMD ["/app/entrypoint-render.sh"]

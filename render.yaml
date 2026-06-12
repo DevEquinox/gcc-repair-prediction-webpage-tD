@@ -1,0 +1,63 @@
+# Render Blueprint for the GCC spare-parts prediction app.
+# This replaces the local docker-compose + nginx setup with two Render Web Services.
+#
+# After pushing this file to your repo:
+#   1. Go to https://dashboard.render.com/blueprints
+#   2. Click "New Blueprint Instance"
+#   3. Connect the repo
+#   4. Render will prompt for the sync: false secrets below (AUTH_USERNAME, AUTH_PASSWORD_HASH).
+
+services:
+  # FastAPI backend (Docker)
+  - type: web
+    name: gcc-backend
+    runtime: docker
+    dockerfilePath: backend/Dockerfile.render
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      # CORS origin for the frontend. Render's private-network hostname of the
+      # frontend service is used to build the public origin.
+      - key: FRONTEND_ORIGIN_HOST
+        fromService:
+          name: gcc-frontend
+          type: web
+          property: host
+      # Set to true so the auth cookie is marked Secure (required for cross-origin/SameSite=None).
+      - key: COOKIE_SECURE
+        value: "true"
+      # These secrets are prompted for in the Render Dashboard when you create
+      # the Blueprint instance. Do not commit real values here.
+      - key: AUTH_USERNAME
+        sync: false
+      - key: AUTH_PASSWORD_HASH
+        sync: false
+      - key: AUTH_SECRET_KEY
+        generateValue: true
+    disk:
+      name: gcc-model-data
+      mountPath: /model
+      sizeGB: 2
+
+  # SvelteKit frontend (Node)
+  - type: web
+    name: gcc-frontend
+    runtime: node
+    rootDir: frontend
+    plan: starter
+    buildCommand: npm ci && VITE_API_BASE_URL="https://${VITE_API_HOST}.onrender.com" npm run build
+    startCommand: node build/index.js
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # VITE_API_HOST is the private-network hostname of the backend service.
+      # The build command turns it into the public API base URL.
+      - key: VITE_API_HOST
+        fromService:
+          name: gcc-backend
+          type: web
+          property: host

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiFetch } from "$lib/api";
+
   let username = "";
   let password = "";
   let loading = false;
@@ -10,7 +12,7 @@
     errorMessage = "";
 
     try {
-      const response = await fetch("/api/login", {
+      const response = await apiFetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),

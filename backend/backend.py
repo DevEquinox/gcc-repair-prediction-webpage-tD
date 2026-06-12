@@ -24,6 +24,17 @@ AUTH_PASSWORD_HASH = os.getenv("AUTH_PASSWORD_HASH", "")
 AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "")
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "")
+FRONTEND_ORIGIN_HOST = os.getenv("FRONTEND_ORIGIN_HOST", "")
+if not FRONTEND_ORIGIN and FRONTEND_ORIGIN_HOST:
+    FRONTEND_ORIGIN = f"https://{FRONTEND_ORIGIN_HOST}.onrender.com"
+
+# Cross-origin deployments (e.g. separate Render Web Services) need
+# SameSite=None, which in turn requires Secure. Same-origin deployments keep Lax.
+SAMESITE = "none" if FRONTEND_ORIGIN else "lax"
+if SAMESITE == "none":
+    COOKIE_SECURE = True
+
 def _decode_password_hash(raw_hash: str) -> str:
     if not raw_hash:
         return ""
@@ -43,8 +54,8 @@ app = FastAPI(title="Spare Parts Inventory Prediction Engine")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=[FRONTEND_ORIGIN] if FRONTEND_ORIGIN else ["*"],
+    allow_credentials=bool(FRONTEND_ORIGIN),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -351,6 +362,10 @@ def compute_metrics(model, X, y):
 def startup_event():
     os.makedirs(MODEL_DIR, exist_ok=True)
 
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
 @app.post("/api/login")
 def login(payload: LoginRequest, response: Response):
     if not AUTH_USERNAME or not AUTH_PASSWORD_HASH:
@@ -374,7 +389,7 @@ def login(payload: LoginRequest, response: Response):
         value=token,
         httponly=True,
         secure=COOKIE_SECURE,
-        samesite="lax",
+        samesite=SAMESITE,
         max_age=SESSION_MAX_AGE,
         path="/",
     )
@@ -382,7 +397,13 @@ def login(payload: LoginRequest, response: Response):
 
 @app.post("/api/logout")
 def logout(response: Response):
-    response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        path="/",
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite=SAMESITE,
+    )
     return {"message": "Sesión cerrada"}
 
 @app.get("/api/models/requirements", dependencies=[Depends(get_current_user)])

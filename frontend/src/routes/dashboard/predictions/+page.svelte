@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { apiFetch } from "$lib/api";
 
   type PredictionRow = {
     plant: string;
@@ -37,7 +38,7 @@
   onMount(async () => {
     // Load predictions
     try {
-      const response = await fetch("/api/predictions");
+      const response = await apiFetch("/api/predictions");
       if (!response.ok) {
         const data = await response.json();
         const detail = data.detail ?? "";
@@ -68,7 +69,7 @@
 
     // Load current model metadata
     try {
-      const res = await fetch("/api/models/current");
+      const res = await apiFetch("/api/models/current");
       if (res.ok) {
         currentModel = await res.json();
       }

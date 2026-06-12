@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { apiFetch } from "$lib/api";
 
   type HistoryItem = {
     version_id: string;
@@ -28,7 +29,7 @@
     errorMessage = "";
     rollbackMessage = "";
     try {
-      const res = await fetch("/api/models/history");
+      const res = await apiFetch("/api/models/history");
       if (!res.ok) {
         const data = await res.json();
         errorMessage = data.detail ?? data.message ?? "Error al cargar el historial de modelos.";
@@ -49,7 +50,7 @@
     rollbackMessage = "";
     errorMessage = "";
     try {
-      const res = await fetch("/api/models/rollback", {
+      const res = await apiFetch("/api/models/rollback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ version_id: versionId }),

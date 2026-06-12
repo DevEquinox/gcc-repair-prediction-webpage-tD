@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from "$app/stores";
+  import { apiFetch } from "$lib/api";
 
   const nav = [
     { label: "Predicciones", href: "/dashboard/predictions" },
@@ -8,7 +9,7 @@
   ];
 
   async function logout() {
-    await fetch("/api/logout", { method: "POST" });
+    await apiFetch("/api/logout", { method: "POST" });
     window.location.href = "/login";
   }
 </script>

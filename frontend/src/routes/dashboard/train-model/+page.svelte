@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { apiFetch } from "$lib/api";
 
   type ModelMetrics = {
     train_mae: number;
@@ -74,7 +75,7 @@
     }
 
     try {
-      const response = await fetch("/api/models/train", {
+      const response = await apiFetch("/api/models/train", {
         method: "POST",
         body: formData
       });
@@ -98,7 +99,7 @@
 
   onMount(async () => {
     try {
-      const response = await fetch("/api/models/requirements");
+      const response = await apiFetch("/api/models/requirements");
       if (!response.ok) {
         const data = await response.json();
         requirementsError = data.detail ?? "Error al cargar requisitos.";
@@ -117,7 +118,7 @@
 
     confirmMessage = "";
 
-    const response = await fetch("/api/models/confirm", {
+    const response = await apiFetch("/api/models/confirm", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"

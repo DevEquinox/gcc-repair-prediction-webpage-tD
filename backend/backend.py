@@ -96,7 +96,7 @@ def get_current_user(request: Request) -> str:
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
+            detail="No autenticado",
             headers={"WWW-Authenticate": "Bearer"},
         )
     try:
@@ -105,7 +105,7 @@ def get_current_user(request: Request) -> str:
     except (BadSignature, SignatureExpired):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired session",
+            detail="Sesión inválida o expirada",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -173,11 +173,11 @@ def preprocess_raw_sheets(
             excel_file = io.BytesIO(excel_file)
         xls = pd.ExcelFile(excel_file)
     except Exception as e:
-        raise ValueError(f"Invalid Excel file format: {str(e)}")
+        raise ValueError(f"Formato de archivo Excel inválido: {str(e)}")
 
     missing_sheets = [sheet for sheet in REQUIRED_SHEETS if sheet not in xls.sheet_names]
     if missing_sheets:
-        raise ValueError(f"Missing required Excel worksheets: {', '.join(missing_sheets)}")
+        raise ValueError(f"Hojas de Excel requeridas faltantes: {', '.join(missing_sheets)}")
 
     teams = pd.read_excel(xls, sheet_name="Equipos")
     orders = pd.read_excel(xls, sheet_name="Ordenes de trabajo")
@@ -189,7 +189,7 @@ def preprocess_raw_sheets(
         df_local = df_map[sheet_name]
         missing = [c for c in required_cols if c not in df_local.columns]
         if missing:
-            missing_cols_report.append(f"Sheet '{sheet_name}' missing columns: {', '.join(missing)}")
+            missing_cols_report.append(f"Hoja '{sheet_name}' columnas faltantes: {', '.join(missing)}")
     if missing_cols_report:
         raise ValueError("; ".join(missing_cols_report))
 
@@ -303,7 +303,7 @@ def create_training_snapshots(master_df: pd.DataFrame) -> pd.DataFrame:
             snapshots.append(snap)
 
     if not snapshots:
-        raise ValueError("No valid snapshots could be generated from the dataset.")
+        raise ValueError("No se pudieron generar snapshots válidos del dataset.")
 
     return pd.concat(snapshots, ignore_index=True)
 
@@ -356,7 +356,7 @@ def login(payload: LoginRequest, response: Response):
     if not AUTH_USERNAME or not AUTH_PASSWORD_HASH:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Authentication is not configured on the server.",
+            detail="La autenticación no está configurada en el servidor.",
         )
 
     if payload.username != AUTH_USERNAME or not verify_password(
@@ -364,7 +364,7 @@ def login(payload: LoginRequest, response: Response):
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
+            detail="Usuario o contraseña inválidos",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -378,12 +378,12 @@ def login(payload: LoginRequest, response: Response):
         max_age=SESSION_MAX_AGE,
         path="/",
     )
-    return {"message": "Logged in successfully"}
+    return {"message": "Sesión iniciada correctamente"}
 
 @app.post("/api/logout")
 def logout(response: Response):
     response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
-    return {"message": "Logged out"}
+    return {"message": "Sesión cerrada"}
 
 @app.get("/api/models/requirements", dependencies=[Depends(get_current_user)])
 def get_training_requirements():
@@ -399,7 +399,7 @@ def get_predictions():
     if model is None or encoders is None or features is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No existing model",
+            detail="No hay modelo existente",
         )
 
     try:
@@ -448,7 +448,7 @@ def get_predictions():
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Prediction pipeline failed: {str(e)}",
+            detail=f"La predicción falló: {str(e)}",
         )
 
 @app.post("/api/models/train", status_code=status.HTTP_200_OK, dependencies=[Depends(get_current_user)])
@@ -459,7 +459,7 @@ async def train_new_model(
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid format. Only Excel Workbooks (.xlsx / .xls) are accepted.",
+            detail="Formato inválido. Solo se aceptan libros de Excel (.xlsx / .xls).",
         )
 
     file_content = await file.read()
@@ -485,7 +485,7 @@ async def train_new_model(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"message": f"Preprocessing failed: {str(e)}", "missing_columns": []},
+            detail={"message": f"El preprocesamiento falló: {str(e)}", "missing_columns": []},
         )
 
     try:
@@ -579,7 +579,7 @@ async def train_new_model(
 
     return {
         "run_id": run_id,
-        "message": "Data ingestion successful. Candidate pipeline evaluated.",
+        "message": "Ingesta de datos exitosa. Pipeline candidato evaluado.",
         "current_model": current_metrics,
         "new_model": new_metrics,
     }
@@ -593,7 +593,7 @@ def confirm_model_promotion(payload: ConfirmModelRequest):
         candidate_bundle_path = os.path.join(MODEL_DIR, f"candidate_{payload.run_id}.joblib")
         if os.path.exists(candidate_bundle_path):
             os.remove(candidate_bundle_path)
-        return {"message": "Candidate discarded. Existing production artifacts retained."}
+        return {"message": "Candidato descartado. Artefactos de producción existentes retenidos."}
 
     if action == "y":
         candidate = CANDIDATE_REGISTRY.get(payload.run_id)
@@ -611,12 +611,12 @@ def confirm_model_promotion(payload: ConfirmModelRequest):
                 except Exception:
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Staged run ID not found or already processed.",
+                        detail="ID de ejecución no encontrado o ya procesado.",
                     )
             else:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Staged run ID not found or already processed.",
+                    detail="ID de ejecución no encontrado o ya procesado.",
                 )
 
         try:
@@ -641,18 +641,18 @@ def confirm_model_promotion(payload: ConfirmModelRequest):
             if os.path.exists(candidate_bundle_path):
                 os.remove(candidate_bundle_path)
             return {
-                "message": f"Success! Model candidate {payload.run_id} has been promoted to production."
+                "message": f"¡Éxito! El candidato {payload.run_id} ha sido promovido a producción."
             }
 
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to persist production models: {str(e)}",
+                detail=f"Error al persistir modelos de producción: {str(e)}",
             )
 
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Invalid use_new_model value. Expected 'y' or 'n'.",
+        detail="Valor use_new_model inválido. Se esperaba 'y' o 'n'.",
     )
 
 @app.get("/api/models/current", dependencies=[Depends(get_current_user)])
@@ -661,14 +661,14 @@ def get_current_model():
     if not version_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No active model found.",
+            detail="No se encontró modelo activo.",
         )
 
     metrics_path = os.path.join(MODEL_DIR, f"metrics_{version_id}.json")
     if not os.path.exists(metrics_path):
         return {
             "version_id": version_id,
-            "message": "Metrics not found for active model.",
+            "message": "Métricas no encontradas para el modelo activo.",
         }
 
     with open(metrics_path, "r") as f:
@@ -714,7 +714,7 @@ def rollback_model(payload: RollbackModelRequest):
     if not os.path.exists(target_metrics_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="The requested fallback version does not exist.",
+            detail="La versión solicitada no existe.",
         )
 
     try:
@@ -722,10 +722,10 @@ def rollback_model(payload: RollbackModelRequest):
             json.dump({"active_version_id": payload.version_id}, f, indent=4)
 
         return {
-            "message": f"Successfully rolled back active production engine to version: {payload.version_id}"
+            "message": f"Se activó exitosamente el motor de producción a la versión: {payload.version_id}"
         }
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed updating pointer metadata during rollback: {str(e)}",
+            detail=f"Error al actualizar metadata durante activación: {str(e)}",
         )

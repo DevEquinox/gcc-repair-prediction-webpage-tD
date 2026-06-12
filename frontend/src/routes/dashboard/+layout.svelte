@@ -2,9 +2,9 @@
   import { page } from "$app/stores";
 
   const nav = [
-    { label: "Predictions", href: "/dashboard/predictions" },
-    { label: "Train Model", href: "/dashboard/train-model" },
-    { label: "Model History", href: "/dashboard/model-history" },
+    { label: "Predicciones", href: "/dashboard/predictions" },
+    { label: "Entrenar Modelo", href: "/dashboard/train-model" },
+    { label: "Historial de Modelos", href: "/dashboard/model-history" },
   ];
 
   async function logout() {
@@ -15,7 +15,7 @@
 
 <div class="shell">
   <aside class="sidebar">
-    <h2>GCC Dashboard</h2>
+    <h2>Panel GCC</h2>
     <nav>
       {#each nav as item}
         <a
@@ -27,7 +27,7 @@
       {/each}
     </nav>
 
-    <button class="logout" on:click={logout}>Sign out</button>
+    <button class="logout" on:click={logout}>Cerrar sesión</button>
   </aside>
 
   <main class="content">

@@ -57,7 +57,7 @@
 
   async function uploadDataset() {
     if (!file) {
-      errorMessage = "Please upload a dataset first.";
+      errorMessage = "Por favor carga un dataset primero.";
       return;
     }
 
@@ -82,7 +82,7 @@
       const data = await response.json();
 
       if (!response.ok) {
-        errorMessage = data.message ?? "The dataset could not be processed.";
+        errorMessage = data.message ?? "El dataset no pudo ser procesado.";
         missingColumns = data.missing_columns ?? [];
         return;
       }
@@ -90,7 +90,7 @@
       trainResponse = data;
     } catch (error) {
       console.log(error);
-      errorMessage = "Unexpected error while uploading the dataset.";
+      errorMessage = "Error inesperado al cargar el dataset.";
     } finally {
       loading = false;
     }
@@ -101,12 +101,12 @@
       const response = await fetch("/api/models/requirements");
       if (!response.ok) {
         const data = await response.json();
-        requirementsError = data.detail ?? "Failed to load requirements.";
+        requirementsError = data.detail ?? "Error al cargar requisitos.";
         return;
       }
       requirements = await response.json();
     } catch (err) {
-      requirementsError = "Network error loading requirements.";
+      requirementsError = "Error de red cargando requisitos.";
     } finally {
       requirementsLoading = false;
     }
@@ -131,7 +131,7 @@
     const data = await response.json();
 
     if (!response.ok) {
-      confirmMessage = data.detail ?? data.message ?? "Could not confirm model selection.";
+      confirmMessage = data.detail ?? data.message ?? "No se pudo confirmar la selección del modelo.";
       return;
     }
 
@@ -140,29 +140,29 @@
 </script>
 
 <section class="page">
-  <h1>Train New Model</h1>
+  <h1>Entrenar Nuevo Modelo</h1>
   <p>
-    Upload a new dataset to train a candidate model and compare it against the
-    current production model.
+    Carga un nuevo dataset para entrenar un modelo candidato y compararlo contra
+    el modelo de producción actual.
   </p>
 
   {#if requirementsLoading}
-    <p>Loading dataset requirements...</p>
+    <p>Cargando requisitos del dataset...</p>
   {:else if requirementsError}
     <div class="error">
       <p>{requirementsError}</p>
     </div>
   {:else if requirements}
     <div class="requirements-card">
-      <h2>Required Dataset Format</h2>
-      <p>The uploaded Excel workbook must contain these sheets:</p>
+      <h2>Formato de Dataset Requerido</h2>
+      <p>El libro de Excel cargado debe contener estas hojas:</p>
       <ul>
         {#each requirements.sheets as sheet}
           <li><strong>{sheet}</strong></li>
         {/each}
       </ul>
 
-      <p>Each sheet must have these exact column names:</p>
+      <p>Cada hoja debe tener exactamente estos nombres de columna:</p>
       {#each Object.entries(requirements.columns) as [sheet, columns]}
         <div class="sheet-columns">
           <span class="sheet-name">{sheet}</span>
@@ -174,35 +174,35 @@
 
   <div class="upload-card">
     <label>
-      Upload dataset
+      Cargar dataset
       <input type="file" accept=".xlsx,.xls" on:change={handleFileChange} />
     </label>
 
     {#if file}
-      <p class="file-name">Selected file: {file.name}</p>
+      <p class="file-name">Archivo seleccionado: {file.name}</p>
     {/if}
 
     <label>
-      Upload consumables list (optional)
+      Cargar lista de consumibles (opcional)
       <input type="file" accept=".xlsx,.xls" on:change={handleConsumablesChange} />
     </label>
 
     {#if consumablesFile}
-      <p class="file-name">Selected consumables file: {consumablesFile.name}</p>
+      <p class="file-name">Archivo de consumibles seleccionado: {consumablesFile.name}</p>
     {/if}
 
     <button on:click={uploadDataset} disabled={loading}>
-      {loading ? "Training..." : "Upload and Train"}
+      {loading ? "Entrenando..." : "Cargar y Entrenar"}
     </button>
   </div>
 
   {#if errorMessage}
     <div class="error">
-      <h3>Dataset error</h3>
+      <h3>Error en el dataset</h3>
       <p>{errorMessage}</p>
 
       {#if missingColumns.length > 0}
-        <p>Missing columns:</p>
+        <p>Columnas faltantes:</p>
         <ul>
           {#each missingColumns as column}
             <li>{column}</li>
@@ -214,51 +214,51 @@
 
   {#if trainResponse}
     <div class="results">
-      <h2>Model Comparison</h2>
+      <h2>Comparación de Modelos</h2>
       <p>{trainResponse.message}</p>
 
       <table>
         <thead>
           <tr>
-            <th>Metric</th>
-            <th>Current Model</th>
-            <th>New Model</th>
+            <th>Métrica</th>
+            <th>Modelo Actual</th>
+            <th>Nuevo Modelo</th>
           </tr>
         </thead>
 
         <tbody>
           <tr>
-            <td>Train MAE</td>
+            <td>MAE Entrenamiento</td>
             <td>{trainResponse.current_model.train_mae}</td>
             <td>{trainResponse.new_model.train_mae}</td>
           </tr>
 
           <tr>
-            <td>Validation MAE</td>
+            <td>MAE Validación</td>
             <td>{trainResponse.current_model.val_mae}</td>
             <td>{trainResponse.new_model.val_mae}</td>
           </tr>
 
           <tr>
-            <td>Train R²</td>
+            <td>R² Entrenamiento</td>
             <td>{trainResponse.current_model.train_r2}</td>
             <td>{trainResponse.new_model.train_r2}</td>
           </tr>
 
           <tr>
-            <td>Validation R²</td>
+            <td>R² Validación</td>
             <td>{trainResponse.current_model.val_r2}</td>
             <td>{trainResponse.new_model.val_r2}</td>
           </tr>
 
           <tr>
-            <td>Train RMSE</td>
+            <td>RMSE Entrenamiento</td>
             <td>{trainResponse.current_model.train_rmse}</td>
             <td>{trainResponse.new_model.train_rmse}</td>
           </tr>
 
           <tr>
-            <td>Validation RMSE</td>
+            <td>RMSE Validación</td>
             <td>{trainResponse.current_model.val_rmse}</td>
             <td>{trainResponse.new_model.val_rmse}</td>
           </tr>
@@ -267,11 +267,11 @@
 
       <div class="actions">
         <button class="accept" on:click={() => confirmModel(true)}>
-          Use new model
+          Usar nuevo modelo
         </button>
 
         <button class="reject" on:click={() => confirmModel(false)}>
-          Keep old model
+          Mantener modelo anterior
         </button>
       </div>
     </div>

@@ -18,13 +18,13 @@
 
       if (!response.ok) {
         const data = await response.json();
-        errorMessage = data.detail ?? "Invalid username or password.";
+        errorMessage = data.detail ?? "Usuario o contraseña inválidos.";
         return;
       }
 
       window.location.href = "/dashboard/predictions";
     } catch (err) {
-      errorMessage = "Network error. Is the backend running?";
+      errorMessage = "Error de red. ¿El backend está ejecutándose?";
     } finally {
       loading = false;
     }
@@ -33,27 +33,27 @@
 
 <section class="login-page">
   <div class="login-card">
-    <h1>GCC Dashboard</h1>
-    <p>Please sign in to continue.</p>
+    <h1>Panel GCC</h1>
+    <p>Inicia sesión para continuar.</p>
 
     <form on:submit={handleLogin}>
       <label>
-        Username
+        Usuario
         <input
           type="text"
           bind:value={username}
-          placeholder="Username"
+          placeholder="Usuario"
           required
           disabled={loading}
         />
       </label>
 
       <label>
-        Password
+        Contraseña
         <input
           type="password"
           bind:value={password}
-          placeholder="Password"
+          placeholder="Contraseña"
           required
           disabled={loading}
         />
@@ -64,7 +64,7 @@
       {/if}
 
       <button type="submit" disabled={loading}>
-        {loading ? "Signing in..." : "Sign in"}
+        {loading ? "Iniciando sesión..." : "Iniciar sesión"}
       </button>
     </form>
   </div>

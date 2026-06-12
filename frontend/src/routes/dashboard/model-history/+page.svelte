@@ -31,13 +31,13 @@
       const res = await fetch("/api/models/history");
       if (!res.ok) {
         const data = await res.json();
-        errorMessage = data.detail ?? data.message ?? "Failed to load model history.";
+        errorMessage = data.detail ?? data.message ?? "Error al cargar el historial de modelos.";
         history = [];
         return;
       }
       history = await res.json();
     } catch (e) {
-      errorMessage = "Network error. Is the backend running?";
+      errorMessage = "Error de red. ¿El backend está ejecutándose?";
       history = [];
     } finally {
       loading = false;
@@ -56,13 +56,13 @@
       });
       const data = await res.json();
       if (!res.ok) {
-        errorMessage = data.detail ?? data.message ?? "Rollback failed.";
+        errorMessage = data.detail ?? data.message ?? "Error al activar.";
         return;
       }
       rollbackMessage = data.message;
       await loadHistory();
     } catch (e) {
-      errorMessage = "Network error during rollback.";
+      errorMessage = "Error de red al activar.";
     } finally {
       rollingBackId = null;
     }
@@ -72,32 +72,32 @@
 </script>
 
 <section class="page">
-  <h1>Model History</h1>
-  <p>View all previously trained models and activate an older version if needed.</p>
+  <h1>Historial de Modelos</h1>
+  <p>Ver todos los modelos entrenados anteriormente y activar una versión anterior si es necesario.</p>
 
   {#if loading}
-    <p class="info">Loading history...</p>
+    <p class="info">Cargando historial...</p>
   {:else if errorMessage}
     <div class="error">
       <p>{errorMessage}</p>
-      <button on:click={loadHistory}>Retry</button>
+      <button on:click={loadHistory}>Reintentar</button>
     </div>
   {:else if history.length === 0}
     <div class="empty">
-      <p>No model history found. Train your first model to get started.</p>
+      <p>No se encontró historial de modelos. Entrena tu primer modelo para comenzar.</p>
     </div>
   {:else}
     <div class="table-card">
       <table>
         <thead>
           <tr>
-            <th>Version ID</th>
-            <th>Trained At</th>
-            <th>Val MAE</th>
-            <th>Val R²</th>
-            <th>Val RMSE</th>
-            <th>Status</th>
-            <th>Action</th>
+            <th>ID de Versión</th>
+            <th>Entrenado el</th>
+            <th>MAE Validación</th>
+            <th>R² Validación</th>
+            <th>RMSE Validación</th>
+            <th>Estado</th>
+            <th>Acción</th>
           </tr>
         </thead>
         <tbody>
@@ -110,9 +110,9 @@
               <td>{item.val_rmse?.toFixed(4) ?? "—"}</td>
               <td>
                 {#if item.is_active}
-                  <span class="badge active-badge">Active</span>
+                  <span class="badge active-badge">Activo</span>
                 {:else}
-                  <span class="badge">Inactive</span>
+                  <span class="badge">Inactivo</span>
                 {/if}
               </td>
               <td>
@@ -122,7 +122,7 @@
                     on:click={() => activateModel(item.version_id)}
                     disabled={rollingBackId === item.version_id}
                   >
-                    {rollingBackId === item.version_id ? "Activating..." : "Activate"}
+                    {rollingBackId === item.version_id ? "Activando..." : "Activar"}
                   </button>
                 {:else}
                   <span class="muted">—</span>

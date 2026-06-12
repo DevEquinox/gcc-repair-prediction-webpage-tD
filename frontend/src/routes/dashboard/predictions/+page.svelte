@@ -22,10 +22,10 @@
   let rows: PredictionRow[] = [];
   let loading = true;
   let errorMessage = "";
+  let noModel = false;
 
   let currentModel: CurrentModel | null = null;
   let modelLoading = true;
-  let modelError = "";
 
   let selectedPlant = "ALL";
   let search = "";
@@ -40,8 +40,14 @@
       const response = await fetch("/api/predictions");
       if (!response.ok) {
         const data = await response.json();
-        errorMessage = data.detail ?? "Failed to load predictions.";
+        const detail = data.detail ?? "";
+        if (detail.toLowerCase().includes("no existing model") || detail.toLowerCase().includes("no active model")) {
+          noModel = true;
+        } else {
+          errorMessage = detail || "Failed to load predictions.";
+        }
         loading = false;
+        modelLoading = false;
         return;
       }
       const data = await response.json();
@@ -53,6 +59,9 @@
       }));
     } catch (err) {
       errorMessage = "Network error. Is the backend running?";
+      loading = false;
+      modelLoading = false;
+      return;
     } finally {
       loading = false;
     }
@@ -62,12 +71,9 @@
       const res = await fetch("/api/models/current");
       if (res.ok) {
         currentModel = await res.json();
-      } else {
-        const data = await res.json();
-        modelError = data.detail ?? "Failed to load current model info.";
       }
     } catch (err) {
-      modelError = "Network error loading model info.";
+      // Best-effort; predictions already loaded.
     } finally {
       modelLoading = false;
     }
@@ -103,102 +109,109 @@
     </div>
   </div>
 
-  <div class="cards">
-    <div class="card">
-      <p>Total estimated quantity</p>
-      <h2>{totalEstimatedQty}</h2>
+  {#if noModel}
+    <div class="no-model">
+      <h2>No existing model</h2>
+      <p>
+        Train a model first to see spare part demand predictions.
+      </p>
     </div>
+  {:else}
+    <div class="cards">
+      <div class="card">
+        <p>Total estimated quantity</p>
+        <h2>{totalEstimatedQty}</h2>
+      </div>
 
-    <div class="card">
-      <p>Displayed part records</p>
-      <h2>{totalParts}</h2>
-    </div>
-  </div>
-
-  {#if modelLoading}
-    <div class="model-info loading">Loading current model info...</div>
-  {:else if modelError}
-    <div class="model-info error">{modelError}</div>
-  {:else if currentModel}
-    <div class="model-info">
-      <h3>Current Production Model</h3>
-      <div class="model-grid">
-        <div>
-          <span class="label">Version ID</span>
-          <span class="value mono">{currentModel.version_id}</span>
-        </div>
-        <div>
-          <span class="label">Trained At</span>
-          <span class="value">{formatDate(currentModel.timestamp)}</span>
-        </div>
-        <div>
-          <span class="label">Val MAE</span>
-          <span class="value">{currentModel.val_mae?.toFixed(4) ?? "—"}</span>
-        </div>
-        <div>
-          <span class="label">Val R²</span>
-          <span class="value">{currentModel.val_r2?.toFixed(4) ?? "—"}</span>
-        </div>
-        <div>
-          <span class="label">Val RMSE</span>
-          <span class="value">{currentModel.val_rmse?.toFixed(4) ?? "—"}</span>
-        </div>
+      <div class="card">
+        <p>Displayed part records</p>
+        <h2>{totalParts}</h2>
       </div>
     </div>
-  {/if}
 
-  <div class="filters">
-    <label>
-      Plant
-      <select bind:value={selectedPlant}>
-        {#each plants as plant}
-          <option value={plant}>{plant}</option>
-        {/each}
-      </select>
-    </label>
+    {#if modelLoading}
+      <div class="model-info loading">Loading current model info...</div>
+    {:else if currentModel}
+      <div class="model-info">
+        <h3>Current Production Model</h3>
+        <div class="model-grid">
+          <div>
+            <span class="label">Version ID</span>
+            <span class="value mono">{currentModel.version_id}</span>
+          </div>
+          <div>
+            <span class="label">Trained At</span>
+            <span class="value">{formatDate(currentModel.timestamp)}</span>
+          </div>
+          <div>
+            <span class="label">Val MAE</span>
+            <span class="value">{currentModel.val_mae?.toFixed(4) ?? "—"}</span>
+          </div>
+          <div>
+            <span class="label">Val R²</span>
+            <span class="value">{currentModel.val_r2?.toFixed(4) ?? "—"}</span>
+          </div>
+          <div>
+            <span class="label">Val RMSE</span>
+            <span class="value">{currentModel.val_rmse?.toFixed(4) ?? "—"}</span>
+          </div>
+        </div>
+      </div>
+    {/if}
 
-    <label>
-      Search part
-      <input
-        type="text"
-        bind:value={search}
-        placeholder="Search by part name or material ID"
-      />
-    </label>
-  </div>
-
-  {#if loading}
-    <p>Loading predictions...</p>
-  {:else if errorMessage}
-    <div class="error">
-      <p>{errorMessage}</p>
-    </div>
-  {:else if filteredRows.length === 0}
-    <p>No predictions match your filters.</p>
-  {:else}
-    <div class="table-wrapper">
-      <table>
-        <thead>
-          <tr>
-            <th>Plant</th>
-            <th>Material ID</th>
-            <th>Spare Part Name</th>
-            <th>Estimated Quantity Required</th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {#each filteredRows as row}
-            <tr>
-              <td>{row.plant}</td>
-              <td>{row.material}</td>
-              <td>{row.spare_part_name}</td>
-              <td>{row.estimated_quantity}</td>
-            </tr>
+    <div class="filters">
+      <label>
+        Plant
+        <select bind:value={selectedPlant}>
+          {#each plants as plant}
+            <option value={plant}>{plant}</option>
           {/each}
-        </tbody>
-      </table>
+        </select>
+      </label>
+
+      <label>
+        Search part
+        <input
+          type="text"
+          bind:value={search}
+          placeholder="Search by part name or material ID"
+        />
+      </label>
     </div>
+
+    {#if loading}
+      <p>Loading predictions...</p>
+    {:else if errorMessage}
+      <div class="error">
+        <p>{errorMessage}</p>
+      </div>
+    {:else if filteredRows.length === 0}
+      <p>No predictions match your filters.</p>
+    {:else}
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Plant</th>
+              <th>Material ID</th>
+              <th>Spare Part Name</th>
+              <th>Estimated Quantity Required</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {#each filteredRows as row}
+              <tr>
+                <td>{row.plant}</td>
+                <td>{row.material}</td>
+                <td>{row.spare_part_name}</td>
+                <td>{row.estimated_quantity}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
   {/if}
 </section>
 
@@ -337,5 +350,23 @@
   .model-info.loading {
     color: #6b7280;
     background: #f9fafb;
+  }
+
+  .no-model {
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    padding: 2rem;
+    text-align: center;
+  }
+
+  .no-model h2 {
+    font-size: 1.5rem;
+    margin: 0 0 0.5rem 0;
+  }
+
+  .no-model p {
+    margin: 0;
+    color: #6b7280;
   }
 </style>

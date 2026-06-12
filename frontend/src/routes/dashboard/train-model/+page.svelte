@@ -16,6 +16,7 @@
   };
 
   let file: File | null = null;
+  let consumablesFile: File | null = null;
   let loading = false;
   let errorMessage = "";
   let missingColumns: string[] = [];
@@ -25,6 +26,16 @@
   function handleFileChange(event: Event) {
     const input = event.target as HTMLInputElement;
     file = input.files?.[0] ?? null;
+
+    errorMessage = "";
+    missingColumns = [];
+    trainResponse = null;
+    confirmMessage = "";
+  }
+
+  function handleConsumablesChange(event: Event) {
+    const input = event.target as HTMLInputElement;
+    consumablesFile = input.files?.[0] ?? null;
 
     errorMessage = "";
     missingColumns = [];
@@ -46,6 +57,9 @@
 
     const formData = new FormData();
     formData.append("file", file);
+    if (consumablesFile) {
+      formData.append("consumables", consumablesFile);
+    }
 
     try {
       const response = await fetch("/api/models/train", {
@@ -112,6 +126,15 @@
 
     {#if file}
       <p class="file-name">Selected file: {file.name}</p>
+    {/if}
+
+    <label>
+      Upload consumables list (optional)
+      <input type="file" accept=".xlsx,.xls" on:change={handleConsumablesChange} />
+    </label>
+
+    {#if consumablesFile}
+      <p class="file-name">Selected consumables file: {consumablesFile.name}</p>
     {/if}
 
     <button on:click={uploadDataset} disabled={loading}>

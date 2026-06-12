@@ -29,14 +29,9 @@ MODEL_DIR = "../model"
 # Metadata file that acts as the single source of truth for the active model version
 ACTIVE_VERSION_CONFIG = os.path.join(MODEL_DIR, "active_version.json")
 
-# Default raw data used for predictions when no upload is present
-DEFAULT_DATA_CANDIDATES = [
-    "../../Equipo-D/data/raw/raw_data.xlsx",
-    "../data/raw/raw_data.xlsx",
-    "raw_data.xlsx",
-]
-
-# Consumables list path (for filtering out consumable items)
+# Consumables list path (for filtering out consumable items during training)
+# This is no longer loaded by default; an optional consumables file may be
+# supplied via the training endpoint.
 CONSUMABLES_CANDIDATES = [
     "../../Equipo-D/data/raw/consumables.xlsx",
     "../data/raw/consumables.xlsx",
@@ -90,7 +85,11 @@ def get_active_version_id() -> str:
 
 
 def load_production_artifacts():
-    """Loads production model components securely based on the active version tracker."""
+    """
+    Loads production model components securely based on the active version tracker.
+    Returns (model, encoders, metrics, inference_features). Missing components are
+    returned as None, letting callers decide how to respond.
+    """
     try:
         version_id = get_active_version_id()
 
@@ -98,38 +97,53 @@ def load_production_artifacts():
             model_path = os.path.join(MODEL_DIR, "production_pipeline.joblib")
             encoder_path = os.path.join(MODEL_DIR, "encoder_mappings.joblib")
             metrics_path = os.path.join(MODEL_DIR, "current_production_metrics.json")
+            features_path = os.path.join(MODEL_DIR, "inference_features.joblib")
         else:
             model_path = os.path.join(MODEL_DIR, f"model_{version_id}.joblib")
             encoder_path = os.path.join(MODEL_DIR, f"encoders_{version_id}.joblib")
             metrics_path = os.path.join(MODEL_DIR, f"metrics_{version_id}.json")
+            features_path = os.path.join(MODEL_DIR, f"features_{version_id}.joblib")
 
         model = joblib.load(model_path)
         encoders = joblib.load(encoder_path)
         with open(metrics_path, "r") as f:
             metrics = json.load(f)
-        return model, encoders, metrics
+        features = joblib.load(features_path)
+        return model, encoders, metrics, features
     except Exception:
-        return None, None, None
+        return None, None, None, None
 
 
-def load_consumables() -> set:
-    """Load consumables list from Excel for filtering."""
-    path = find_first_existing(CONSUMABLES_CANDIDATES)
-    if not path:
-        return set()
+def load_consumables(source: Union[str, bytes, None] = None) -> set:
+    """
+    Load consumables list from Excel for filtering.
+    If a source is provided it is used; otherwise the legacy candidates are
+    searched best-effort (kept only for backward compatibility with private
+    training workflows).
+    """
     try:
-        df = pd.read_excel(path, sheet_name=0, header=None)
+        if source is None:
+            path = find_first_existing(CONSUMABLES_CANDIDATES)
+            if not path:
+                return set()
+            df = pd.read_excel(path, sheet_name=0, header=None)
+        elif isinstance(source, bytes):
+            df = pd.read_excel(io.BytesIO(source), sheet_name=0, header=None)
+        else:
+            df = pd.read_excel(source, sheet_name=0, header=None)
         items = df[0].astype(str).str.strip().str.upper().unique()
         return set(items)
     except Exception:
         return set()
 
 
-def preprocess_raw_sheets(excel_file: Union[str, bytes]) -> pd.DataFrame:
+def preprocess_raw_sheets(
+    excel_file: Union[str, bytes], consumables: Union[set, None] = None
+) -> pd.DataFrame:
     """
     Replicates the core preprocessing from notebook 03.
-    Reads the three required sheets, cleans, merges, filters consumables,
-    and returns a consolidated DataFrame.
+    Reads the three required sheets, cleans, merges, optionally filters
+    consumables, and returns a consolidated DataFrame.
     """
     try:
         if isinstance(excel_file, bytes):
@@ -178,7 +192,6 @@ def preprocess_raw_sheets(excel_file: Union[str, bytes]) -> pd.DataFrame:
     base = base[base["Description_part"].astype(str).str.strip() != ""]
 
     # --- Filter consumables ---
-    consumables = load_consumables()
     if consumables:
         mask = ~base["Description_part"].astype(str).str.strip().str.upper().isin(consumables)
         base = base[mask]
@@ -246,6 +259,35 @@ def build_snapshot(master_df: pd.DataFrame, ref_date: pd.Timestamp) -> pd.DataFr
     snap["reference_date"] = ref_date
 
     return snap
+
+
+def build_latest_inference_features(master_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Builds the feature snapshot at the latest posting date and returns only the
+    columns required for inference. This allows predictions to be served without
+    keeping the raw dataset on the public server.
+    """
+    if master_df.empty or "Posting Date" not in master_df.columns:
+        return pd.DataFrame()
+
+    ref_date = master_df["Posting Date"].max()
+    snap = build_snapshot(master_df, ref_date)
+    if snap.empty:
+        return snap
+
+    inference_cols = [
+        "plant",
+        "material",
+        "spare_part_name",
+        "qty_last_90d",
+        "orders_last_90d",
+        "qty_last_180d",
+        "orders_last_180d",
+        "days_since_last_used",
+        "reference_month",
+        "part_never_used",
+    ]
+    return snap[inference_cols].copy()
 
 
 def create_training_snapshots(master_df: pd.DataFrame) -> pd.DataFrame:
@@ -316,98 +358,11 @@ def compute_metrics(model, X, y):
     }
 
 
-# --- STARTUP: Train a default model if none exists ---
+# --- STARTUP: Ensure model directory exists ---
 
 @app.on_event("startup")
 def startup_event():
     os.makedirs(MODEL_DIR, exist_ok=True)
-
-    # If an active version already exists, do nothing
-    if os.path.exists(ACTIVE_VERSION_CONFIG):
-        return
-
-    # If legacy artifacts exist, do nothing (let them load naturally)
-    legacy_model = os.path.join(MODEL_DIR, "production_pipeline.joblib")
-    if os.path.exists(legacy_model):
-        return
-
-    # Try to train an initial model from default data
-    data_path = find_first_existing(DEFAULT_DATA_CANDIDATES)
-    if not data_path:
-        print("[Startup] No default data found. Skipping auto-training.")
-        return
-
-    try:
-        print(f"[Startup] Auto-training initial model from {data_path}")
-        master = preprocess_raw_sheets(data_path)
-        model_df = create_training_snapshots(master)
-
-        # Temporal split
-        unique_dates = sorted(model_df["reference_date"].unique())
-        train_end = unique_dates[int(len(unique_dates) * 0.70)]
-        val_end = unique_dates[int(len(unique_dates) * 0.85)]
-
-        train_df = model_df[model_df["reference_date"] <= train_end].copy()
-        val_df = model_df[
-            (model_df["reference_date"] > train_end)
-            & (model_df["reference_date"] <= val_end)
-        ].copy()
-        test_df = model_df[model_df["reference_date"] > val_end].copy()
-
-        target_col = "qty_needed_next_30d"
-        feature_cols = [
-            "plant_encoded",
-            "material_encoded",
-            "qty_last_90d",
-            "orders_last_90d",
-            "qty_last_180d",
-            "orders_last_180d",
-            "days_since_last_used",
-            "reference_month",
-            "part_never_used",
-        ]
-
-        encoders = apply_target_encoding(train_df, val_df, test_df, target_col)
-
-        X_train = train_df[feature_cols]
-        y_train = train_df[target_col]
-        X_val = val_df[feature_cols]
-        y_val = val_df[target_col]
-        X_test = test_df[feature_cols]
-        y_test = test_df[target_col]
-
-        model = train_xgboost_model(X_train, y_train, X_val, y_val)
-
-        train_metrics = compute_metrics(model, X_train, y_train)
-        val_metrics = compute_metrics(model, X_val, y_val)
-        test_metrics = compute_metrics(model, X_test, y_test)
-
-        version_id = "auto-" + str(uuid.uuid4())[:8]
-        full_metrics = {
-            "version_id": version_id,
-            "timestamp": time.time(),
-            "train_mae": train_metrics["mae"],
-            "val_mae": val_metrics["mae"],
-            "test_mae": test_metrics["mae"],
-            "train_rmse": train_metrics["rmse"],
-            "val_rmse": val_metrics["rmse"],
-            "test_rmse": test_metrics["rmse"],
-            "train_r2": train_metrics["r2"],
-            "val_r2": val_metrics["r2"],
-            "test_r2": test_metrics["r2"],
-        }
-
-        joblib.dump(model, os.path.join(MODEL_DIR, f"model_{version_id}.joblib"))
-        joblib.dump(encoders, os.path.join(MODEL_DIR, f"encoders_{version_id}.joblib"))
-        with open(os.path.join(MODEL_DIR, f"metrics_{version_id}.json"), "w") as f:
-            json.dump(full_metrics, f, indent=4)
-
-        with open(ACTIVE_VERSION_CONFIG, "w") as f:
-            json.dump({"active_version_id": version_id}, f, indent=4)
-
-        print(f"[Startup] Auto-trained model {version_id} saved.")
-    except Exception as e:
-        print(f"[Startup] Auto-training failed: {e}")
 
 
 # --- API ENDPOINTS ---
@@ -416,28 +371,20 @@ def startup_event():
 def get_predictions():
     """
     ENDPOINT 1: DASHBOARD PREDICTIONS
-    Loads the active model, builds features from the default dataset,
-    and returns estimated quantities for the next 30 days per plant-material.
+    Loads the active model and its pre-computed inference features, then
+    returns estimated quantities for the next 30 days per plant-material.
+    Requires a trained model; if none exists, returns "No existing model".
     """
-    model, encoders, _ = load_production_artifacts()
+    model, encoders, _, features = load_production_artifacts()
 
-    if model is None or encoders is None:
+    if model is None or encoders is None or features is None:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="No production model is available. Please train a model first.",
-        )
-
-    data_path = find_first_existing(DEFAULT_DATA_CANDIDATES)
-    if not data_path:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Default dataset not found on server.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No existing model",
         )
 
     try:
-        master = preprocess_raw_sheets(data_path)
-        ref_date = master["Posting Date"].max()
-        snap = build_snapshot(master, ref_date)
+        snap = features.copy()
 
         if snap.empty:
             return []
@@ -490,11 +437,15 @@ def get_predictions():
 
 
 @app.post("/api/models/train", status_code=status.HTTP_200_OK)
-async def train_new_model(file: UploadFile = File(...)):
+async def train_new_model(
+    file: UploadFile = File(...),
+    consumables: UploadFile = File(None),
+):
     """
     ENDPOINT 2: DATA SUBMISSION & MODEL RETRAINING
     Accepts a raw Excel workbook, preprocesses it, trains a candidate XGBoost model,
     and returns a comparison against the current production model.
+    An optional consumables Excel file may be supplied to filter consumable items.
     """
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(
@@ -504,8 +455,13 @@ async def train_new_model(file: UploadFile = File(...)):
 
     file_content = await file.read()
 
+    consumables_set = set()
+    if consumables is not None:
+        consumables_content = await consumables.read()
+        consumables_set = load_consumables(consumables_content)
+
     try:
-        master = preprocess_raw_sheets(file_content)
+        master = preprocess_raw_sheets(file_content, consumables=consumables_set)
     except ValueError as ve:
         error_msg = str(ve)
         # Try to extract missing columns info for frontend
@@ -579,7 +535,7 @@ async def train_new_model(file: UploadFile = File(...)):
     }
 
     # Load current model metrics for comparison
-    _, _, current_metrics = load_production_artifacts()
+    _, _, current_metrics, _ = load_production_artifacts()
     if current_metrics is None:
         current_metrics = {
             "train_mae": None,
@@ -594,10 +550,13 @@ async def train_new_model(file: UploadFile = File(...)):
     new_metrics["version_id"] = run_id
     new_metrics["timestamp"] = time.time()
 
+    inference_features = build_latest_inference_features(master)
+
     CANDIDATE_REGISTRY[run_id] = {
         "model": candidate_model,
         "encoders": encoders,
         "metrics": new_metrics,
+        "features": inference_features,
     }
 
     # Persist candidate to disk so it survives backend restarts
@@ -608,6 +567,7 @@ async def train_new_model(file: UploadFile = File(...)):
             "model": candidate_model,
             "encoders": encoders,
             "metrics": new_metrics,
+            "features": inference_features,
         }, candidate_bundle_path)
     except Exception:
         pass  # Best-effort persistence; in-memory registry is the primary source
@@ -649,6 +609,7 @@ def confirm_model_promotion(payload: ConfirmModelRequest):
                         "model": bundle["model"],
                         "encoders": bundle["encoders"],
                         "metrics": bundle["metrics"],
+                        "features": bundle.get("features"),
                     }
                 except Exception:
                     raise HTTPException(
@@ -667,11 +628,13 @@ def confirm_model_promotion(payload: ConfirmModelRequest):
             versioned_model_path = os.path.join(MODEL_DIR, f"model_{payload.run_id}.joblib")
             versioned_encoder_path = os.path.join(MODEL_DIR, f"encoders_{payload.run_id}.joblib")
             versioned_metrics_path = os.path.join(MODEL_DIR, f"metrics_{payload.run_id}.json")
+            versioned_features_path = os.path.join(MODEL_DIR, f"features_{payload.run_id}.joblib")
 
             joblib.dump(candidate["model"], versioned_model_path)
             joblib.dump(candidate["encoders"], versioned_encoder_path)
             with open(versioned_metrics_path, "w") as f:
                 json.dump(candidate["metrics"], f, indent=4)
+            joblib.dump(candidate.get("features"), versioned_features_path)
 
             with open(ACTIVE_VERSION_CONFIG, "w") as f:
                 json.dump({"active_version_id": payload.run_id}, f, indent=4)

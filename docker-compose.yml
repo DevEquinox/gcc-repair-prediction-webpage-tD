@@ -6,7 +6,6 @@ services:
     container_name: gcc-backend
     volumes:
       - ./model:/model
-      - ../Equipo-D/data/raw:/Equipo-D/data/raw:ro
     expose:
       - "8000"
 

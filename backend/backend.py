@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import json
 import uuid
@@ -11,7 +12,7 @@ import numpy as np
 from typing import Dict, Any, List, Union
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, HTTPException, status, Request, Response, Depends
-from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from pydantic import BaseModel
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
@@ -52,13 +53,43 @@ _session_serializer = URLSafeTimedSerializer(AUTH_SECRET_KEY or "fallback-secret
 
 app = FastAPI(title="Spare Parts Inventory Prediction Engine")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[FRONTEND_ORIGIN] if FRONTEND_ORIGIN else ["*"],
-    allow_credentials=bool(FRONTEND_ORIGIN),
-    allow_methods=["*"],
-    allow_headers=["*"],
+# Render gives free-tier services a random suffix in their public URL
+# (e.g. gcc-frontend-l3x1.onrender.com), so we cannot know the exact origin
+# at build time. This middleware echoes back any *.onrender.com origin and
+# allows credentials, which is required for cross-origin cookie auth.
+ALLOWED_ORIGIN_REGEX = re.compile(
+    r"^https://[a-zA-Z0-9\-]+\.onrender\.com$|^http://localhost(:\d+)?$"
 )
+
+
+class RenderCORSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        origin = request.headers.get("origin")
+        allowed = bool(origin and ALLOWED_ORIGIN_REGEX.match(origin))
+
+        if request.method == "OPTIONS":
+            response = Response(status_code=204)
+            if allowed:
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["Access-Control-Allow-Methods"] = (
+                    "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+                )
+                response.headers["Access-Control-Allow-Headers"] = "*"
+                response.headers["Vary"] = "Origin"
+            return response
+
+        response = await call_next(request)
+        if allowed:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Vary"] = "Origin"
+        return response
+
+
+app.add_middleware(RenderCORSMiddleware)
 
 MODEL_DIR = "../model"
 ACTIVE_VERSION_CONFIG = os.path.join(MODEL_DIR, "active_version.json")
@@ -405,6 +436,10 @@ def logout(response: Response):
         samesite=SAMESITE,
     )
     return {"message": "Sesión cerrada"}
+
+@app.get("/api/session")
+def get_session(user: str = Depends(get_current_user)):
+    return {"user": user}
 
 @app.get("/api/models/requirements", dependencies=[Depends(get_current_user)])
 def get_training_requirements():

@@ -1,10 +1,22 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { apiFetch } from "$lib/api";
 
   let username = "";
   let password = "";
   let loading = false;
   let errorMessage = "";
+
+  onMount(async () => {
+    try {
+      const res = await apiFetch("/api/session");
+      if (res.ok) {
+        window.location.href = "/dashboard/predictions";
+      }
+    } catch {
+      // Not authenticated; stay on the login page.
+    }
+  });
 
   async function handleLogin(event: Event) {
     event.preventDefault();

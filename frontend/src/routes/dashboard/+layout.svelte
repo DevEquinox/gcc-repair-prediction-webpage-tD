@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { page } from "$app/stores";
   import { apiFetch } from "$lib/api";
 
@@ -8,12 +9,31 @@
     { label: "Historial de Modelos", href: "/dashboard/model-history" },
   ];
 
+  let checkingAuth = true;
+
+  onMount(async () => {
+    try {
+      const res = await apiFetch("/api/session");
+      if (!res.ok) {
+        window.location.href = "/login";
+        return;
+      }
+    } catch {
+      window.location.href = "/login";
+      return;
+    }
+    checkingAuth = false;
+  });
+
   async function logout() {
     await apiFetch("/api/logout", { method: "POST" });
     window.location.href = "/login";
   }
 </script>
 
+{#if checkingAuth}
+  <div class="checking-auth">Verificando sesión...</div>
+{:else}
 <div class="shell">
   <aside class="sidebar">
     <h2>Panel GCC</h2>
@@ -35,8 +55,18 @@
     <slot />
   </main>
 </div>
+{/if}
 
 <style>
+  .checking-auth {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  }
+
   .shell {
     display: flex;
     min-height: 100vh;
